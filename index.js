@@ -1,76 +1,62 @@
-var spawn = require("child_process").spawn;
-var gifsicle = require("gifsicle").path;
-var streamify = require("streamify");
-var fs = require("graceful-fs");
-var rimraf = require("rimraf");
-var async = require("async");
-var path = require("path");
-var tmp = require("tmp");
+var spawn = require('child_process').spawn
+var gifsicle = require('gifsicle')
+var streamify = require('streamify')
+var fs = require('graceful-fs')
+var rimraf = require('rimraf')
+var async = require('async')
+var path = require('path')
+var tmp = require('tmp')
 
-module.exports = createStream;
+module.exports = createStream
 
-function createStream(path, frameCreated) {
-  var stream = streamify();
+function createStream(frameCreated) {
+  var stream = streamify()
 
-  stream.once("data", (data) => {
-    tmp.dir(
-      {
-        unsafeCleanup: true,
-      },
-      function (err, location) {
-        if (err) throw err;
-        var ps = spawn(
-          gifsicle,
-          [data.toString(), "--unoptimize", "--explode"],
-          {
-            cwd: location,
-            env: {},
-          }
-        );
+  tmp.dir({
+    unsafeCleanup: true
+  }, function(err, location) {
+    if (err) throw err
 
-        ps.once("exit", function (code) {
-          fs.readdir(location, handleFiles);
-        });
+    var ps = spawn(gifsicle, [
+        '--unoptimize'
+      , '--explode'
+    ], {
+        cwd: location
+      , env: {}
+    })
 
-        function handleFiles(err, files) {
-          if (err) return stream.emit("error", err);
+    stream.resolve(ps.stdin)
+    ps.once('exit', function(code) {
+      fs.readdir(location, handleFiles)
+    })
 
-          if (!files.length)
-            return stream.emit(
-              "error",
-              new Error(
-                "No frames could be extracted from the supplied GIF. " +
-                  "This could be because of a processing error, " +
-                  "such as piping in a non-GIF buffer"
-              )
-            );
+    function handleFiles(err, files) {
+      if (err) return stream.emit('error', err)
 
-          async.mapLimit(
-            files,
-            10,
-            function (file, next, i) {
-              file = path.resolve(location, file);
+      if (!files.length) return stream.emit('error', new Error(
+        'No frames could be extracted from the supplied GIF. ' +
+        'This could be because of a processing error, ' +
+        'such as piping in a non-GIF buffer'
+      ))
 
-              var fileStream = fs
-                .createReadStream(file)
-                .once("error", next)
-                .once("close", next);
+      async.mapLimit(files, 10, function(file, next, i) {
+        file = path.resolve(location, file)
 
-              frameCreated(fileStream, i);
-            },
-            finished
-          );
-        }
+        var fileStream = fs.createReadStream(file)
+          .once('error', next)
+          .once('close', next)
 
-        function finished(err) {
-          if (err) stream.emit("error", err);
-          rimraf(location, function (error) {
-            if (error && !err) return stream.emit("error", error);
-          });
-        }
-      }
-    );
-  });
+        frameCreated(fileStream, i)
+      }, finished)
+    }
 
-  return stream;
+    function finished(err) {
+      if (err) stream.emit('error', err)
+      rimraf(location, function(error) {
+        if (error && !err) return stream.emit('error', error)
+      })
+    }
+  })
+
+  return stream
 }
